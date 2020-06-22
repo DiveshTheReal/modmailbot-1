@@ -1,19 +1,13 @@
 const config = require('../config');
 const Eris = require('eris');
-const threadUtils = require('../threadUtils');
 const transliterate = require("transliteration");
+const erisEndpoints = require('eris/lib/rest/Endpoints');
 
-module.exports = bot => {
-  const addInboxServerCommand = (...args) => threadUtils.addInboxServerCommand(bot, ...args);
+module.exports = ({ bot, knex, config, commands }) => {
+  if (! config.allowMove) return;
 
-  addInboxServerCommand('move', async (msg, args, thread) => {
-    if (! config.allowMove) return;
-
-    if (! thread) return;
-
-    const searchStr = args[0];
-    if (! searchStr || searchStr.trim() === '') return;
-
+  commands.addInboxThreadCommand('move', '<category:string$>', async (msg, args, thread) => {
+    const searchStr = args.category;
     const normalizedSearchStr = transliterate.slugify(searchStr);
 
     const categories = msg.channel.guild.channels.filter(c => {
@@ -32,7 +26,7 @@ module.exports = bot => {
         if (! normalizedCatName.includes(normalizedSearchStr.slice(0, i + 1))) break;
         i++;
       } while (i < normalizedSearchStr.length);
-      
+
       if (i > 0 && normalizedCatName.startsWith(normalizedSearchStr.slice(0, i))) {
         // Slightly prioritize categories that *start* with the search string
         i += 0.5;
@@ -53,9 +47,35 @@ module.exports = bot => {
 
     const targetCategory = containsRankings[0][0];
 
-    await bot.editChannel(thread.channel_id, {
-      parentID: targetCategory.id
-    });
+    try {
+      await bot.editChannel(thread.channel_id, {
+        parentID: targetCategory.id
+      });
+    } catch (e) {
+      thread.postSystemMessage(`Failed to move thread: ${e.message}`);
+      return;
+    }
+
+    // If enabled, sync thread channel permissions with the category it's moved to
+    if (config.syncPermissionsOnMove) {
+      const newPerms = Array.from(targetCategory.permissionOverwrites.map(ow => {
+        return {
+          id: ow.id,
+          type: ow.type,
+          allow: ow.allow,
+          deny: ow.deny
+        };
+      }));
+
+      try {
+        await bot.requestHandler.request("PATCH", erisEndpoints.CHANNEL(thread.channel_id), true, {
+          permission_overwrites: newPerms
+        });
+      } catch (e) {
+        thread.postSystemMessage(`Thread moved to ${targetCategory.name.toUpperCase()}, but failed to sync permissions: ${e.message}`);
+        return;
+      }
+    }
 
     thread.postSystemMessage(`Thread moved to ${targetCategory.name.toUpperCase()}`);
   });

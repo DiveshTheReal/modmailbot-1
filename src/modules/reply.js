@@ -1,31 +1,32 @@
 const attachments = require("../data/attachments");
-const threadUtils = require("../threadUtils");
+const utils = require('../utils');
 
-module.exports = bot => {
-  const addInboxServerCommand = (...args) => threadUtils.addInboxServerCommand(bot, ...args);
-
+module.exports = ({ bot, knex, config, commands }) => {
   // Mods can reply to modmail threads using !r or !reply
   // These messages get relayed back to the DM thread between the bot and the user
-  addInboxServerCommand('reply', async (msg, args, thread) => {
-    if (! thread) return;
+  commands.addInboxThreadCommand('reply', '[text$]', async (msg, args, thread) => {
+    if (! args.text && msg.attachments.length === 0) {
+      utils.postError(msg.channel, 'Text or attachment required');
+      return;
+    }
 
-    const text = args.join(' ').trim();
-    if (msg.attachments.length) await attachments.saveAttachmentsInMessage(msg);
-    await thread.replyToUser(msg.member, text, msg.attachments, false);
-    msg.delete();
+    const replied = await thread.replyToUser(msg.member, args.text || '', msg.attachments, false);
+    if (replied) msg.delete();
+  }, {
+    aliases: ['r']
   });
 
-  bot.registerCommandAlias('r', 'reply');
 
   // Anonymous replies only show the role, not the username
-  addInboxServerCommand('anonreply', async (msg, args, thread) => {
-    if (! thread) return;
+  commands.addInboxThreadCommand('anonreply', '[text$]', async (msg, args, thread) => {
+    if (! args.text && msg.attachments.length === 0) {
+      utils.postError(msg.channel, 'Text or attachment required');
+      return;
+    }
 
-    const text = args.join(' ').trim();
-    if (msg.attachments.length) await attachments.saveAttachmentsInMessage(msg);
-    await thread.replyToUser(msg.member, text, msg.attachments, true);
-    msg.delete();
+    const replied = await thread.replyToUser(msg.member, args.text || '', msg.attachments, true);
+    if (replied) msg.delete();
+  }, {
+    aliases: ['ar']
   });
-
-  bot.registerCommandAlias('ar', 'anonreply');
 };

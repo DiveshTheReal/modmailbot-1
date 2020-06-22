@@ -1,8 +1,8 @@
 const Eris = require('eris');
 const bot = require('./bot');
 const moment = require('moment');
+const humanizeDuration = require('humanize-duration');
 const publicIp = require('public-ip');
-const attachments = require('./data/attachments');
 const config = require('./config');
 
 class BotError extends Error {}
@@ -47,15 +47,14 @@ function getMainGuilds() {
  */
 function getLogChannel() {
   const inboxGuild = getInboxGuild();
-
-  if (! config.logChannelId) {
-    logChannel = inboxGuild.channels.get(inboxGuild.id);
-  } else if (! logChannel) {
-    logChannel = inboxGuild.channels.get(config.logChannelId);
-  }
+  const logChannel = inboxGuild.channels.get(config.logChannelId);
 
   if (! logChannel) {
-    throw new BotError('Log channel not found!');
+    throw new BotError('Log channel (logChannelId) not found!');
+  }
+
+  if (! (logChannel instanceof Eris.TextChannel)) {
+    throw new BotError('Make sure the logChannelId option is set to a text channel!');
   }
 
   return logChannel;
@@ -65,21 +64,22 @@ function postLog(...args) {
   getLogChannel().createMessage(...args);
 }
 
-function postError(str) {
-  getLogChannel().createMessage({
-    content: `${getInboxMention()}**Error:** ${str.trim()}`,
-    disableEveryone: false
+function postError(channel, str, opts = {}) {
+  return channel.createMessage({
+    ...opts,
+    content: `⚠ ${str}`
   });
 }
 
 /**
  * Returns whether the given member has permission to use modmail commands
- * @param member
+ * @param {Eris.Member} member
  * @returns {boolean}
  */
 function isStaff(member) {
-  if (!member) return false;
+  if (! member) return false;
   if (config.inboxServerPermission.length === 0) return true;
+  if (member.guild.ownerID === member.id) return true;
 
   return config.inboxServerPermission.some(perm => {
     if (isSnowflake(perm)) {
@@ -122,11 +122,10 @@ function messageIsOnMainServer(msg) {
  * @param attachment
  * @returns {Promise<string>}
  */
-async function formatAttachment(attachment) {
+async function formatAttachment(attachment, attachmentUrl) {
   let filesize = attachment.size || 0;
   filesize /= 1024;
 
-  const attachmentUrl = await attachments.getUrl(attachment.id, attachment.filename);
   return `**Attachment:** ${attachment.filename} (${filesize.toFixed(1)}KB)\n${attachmentUrl}`;
 }
 
@@ -136,9 +135,11 @@ async function formatAttachment(attachment) {
  * @returns {String|null}
  */
 function getUserMention(str) {
+  if (! str) return null;
+
   str = str.trim();
 
-  if (str.match(/^[0-9]+$/)) {
+  if (isSnowflake(str)) {
     // User ID
     return str;
   } else {
@@ -220,19 +221,20 @@ function trimAll(str) {
     .join('\n');
 }
 
+const delayStringRegex = /^([0-9]+)(?:([dhms])[a-z]*)?/i;
+
 /**
  * Turns a "delay string" such as "1h30m" to milliseconds
  * @param {String} str
- * @returns {Number}
+ * @returns {Number|null}
  */
 function convertDelayStringToMS(str) {
-  const regex = /^([0-9]+)\s*([dhms])?[a-z]*\s*/;
   let match;
   let ms = 0;
 
   str = str.trim();
 
-  while (str !== '' && (match = str.match(regex)) !== null) {
+  while (str !== '' && (match = str.match(delayStringRegex)) !== null) {
     if (match[2] === 'd') ms += match[1] * 1000 * 60 * 60 * 24;
     else if (match[2] === 'h') ms += match[1] * 1000 * 60 * 60;
     else if (match[2] === 's') ms += match[1] * 1000;
@@ -250,10 +252,15 @@ function convertDelayStringToMS(str) {
 }
 
 function getInboxMention() {
-  if (config.mentionRole == null) return '';
-  else if (config.mentionRole === 'here') return '@here ';
-  else if (config.mentionRole === 'everyone') return '@everyone ';
-  else return `<@&${config.mentionRole}> `;
+  const mentionRoles = Array.isArray(config.mentionRole) ? config.mentionRole : [config.mentionRole];
+  const mentions = [];
+  for (const role of mentionRoles) {
+    if (role == null) continue;
+    else if (role === 'here') mentions.push('@here');
+    else if (role === 'everyone') mentions.push('@everyone');
+    else mentions.push(`<@&${role}>`);
+  }
+  return mentions.join(' ') + ' ';
 }
 
 function postSystemMessageWithFallback(channel, thread, text) {
@@ -289,7 +296,25 @@ function setDataModelProps(target, props) {
 
 const snowflakeRegex = /^[0-9]{17,}$/;
 function isSnowflake(str) {
-  return snowflakeRegex.test(str);
+  return str && snowflakeRegex.test(str);
+}
+
+const humanizeDelay = (delay, opts = {}) => humanizeDuration(delay, Object.assign({conjunction: ' and '}, opts));
+
+const markdownCharsRegex = /([\\_*|`~])/g;
+function escapeMarkdown(str) {
+  return str.replace(markdownCharsRegex, '\\$1');
+}
+
+function disableCodeBlocks(str) {
+  return str.replace(/`/g, "`\u200b");
+}
+
+/**
+ *
+ */
+function readMultilineConfigValue(str) {
+  return Array.isArray(str) ? str.join('\n') : str;
 }
 
 module.exports = {
@@ -312,6 +337,7 @@ module.exports = {
   disableLinkPreviews,
   getSelfUrl,
   getMainRole,
+  delayStringRegex,
   convertDelayStringToMS,
   getInboxMention,
   postSystemMessageWithFallback,
@@ -322,4 +348,11 @@ module.exports = {
   setDataModelProps,
 
   isSnowflake,
+
+  humanizeDelay,
+
+  escapeMarkdown,
+  disableCodeBlocks,
+
+  readMultilineConfigValue,
 };

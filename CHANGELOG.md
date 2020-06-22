@@ -1,5 +1,139 @@
 # Changelog
 
+## v2.31.0-beta.0
+This is a beta release. It is not available on the Releases page and bugs are expected.
+
+* Add support for Node.js 13
+  * Support for Node.js 14 is coming in a future update that will also drop Node.js 10 support.
+    This mirrors the `sqlite3` library's version support.
+* Log formatting is now more consistent and easier to parse with automated tools
+* DM channel and message IDs are now stored
+  * Use `!loglink -v` to view these in logs
+  * Use `!dm_channel_id` in an inbox thread to view the DM channel ID
+  * *DM channel and message IDs are primarily useful for Discord T&S reports*
+* Some code reorganisation related to threads and thread messages.
+  If you have a plugin that interacts with Thread or ThreadMessage objects,
+  test them before running this update in production!
+
+## v2.30.1
+* Fix crash with `responseMessage` and `closeMessage` introduced in v2.30.0
+  ([#369](https://github.com/Dragory/modmailbot/pull/369))
+
+## v2.30.0
+* The following config options now also support multi-line values:
+  * `responseMessage`
+  * `closeMessage`
+  * `botMentionResponse`
+  * `greetingMessage`
+  * `accountAgeDeniedMessage`
+  * `timeOnServerDeniedMessage`
+* When the bot is mentioned on the main server, the log message about this now
+  also includes a link to the message ([#319](https://github.com/Dragory/modmailbot/pull/319))
+* Fix error when supplying all config values from env variables without a config file
+* Fix crash in update checker if the repository value in package.json is set to
+  a GitHub repository without releases (this only applies to forks)
+
+## v2.29.1
+* Fix boolean values in `config.ini` not being handled properly
+
+## v2.29.0
+* **Default configuration format is now .ini**
+  * Existing `config.json` files will continue to work and will not be deprecated
+  * This makes the default configuration format for the bot much more approachable than JSON
+* Config values can now also be loaded from environment variables
+  (see [Configuration](docs/configuration.md#environment-variables) for more details)
+* New rewritten instructions for setting up and using the bot
+* New easy-to-use `start.bat` file for Windows
+* Update several package dependencies
+* Fixed incompatibility with Node.js 10 versions prior to 10.9.0
+
+## v2.28.0
+* Fix error when saving attachments locally with `attachmentStorage` set to `"local"` (default) when the bot's folder is
+  on a different storage device than the system's temp folder
+* Add `attachments` object to the plugin API
+  * This allows plugins to add new storage types via `attachments.addStorageType()`
+  * See the [Plugins section in the README](README.md#plugins) for more details
+
+## v2.27.0
+* The `syncPermissionsOnMove` option now defaults to `true`, which should be more intuitive
+* **Plugins:** Plugin functions are no longer called with 4 arguments. Instead, the function is called with 1 argument,
+which is an object that contains the previous 4 values as properties: `bot`, `knex`, `config`, `commands`.
+This will make it easier to scale the plugin system in the future with new features.
+You can see an [updated example in the README](https://github.com/Dragory/modmailbot/blob/master/README.md#example-plugin-file).
+
+## v2.26.0
+* The bot now waits for the main server(s) and inbox server to become available before initializing.
+This is a potential fix to [#335](https://github.com/Dragory/modmailbot/issues/335).
+This should have little to no effect on smaller servers.
+* The bot status ("Playing") is now reapplied hourly since the status can sometimes disappear
+
+## v2.25.0
+* Fix regression introduced in v2.24.0 where line breaks would get turned to spaces in replies and snippets ([#304](https://github.com/Dragory/modmailbot/issues/304))
+* Replace the internal command handler with a new one. This should be fairly thoroughly tested, but please report any issues you encounter!
+* Plugins are now called with a fourth parameter that allows you to easily add specific types of commands
+  * Due to the command handler change, any calls to `bot.registerCommand` should be replaced with the new system
+
+## v2.24.0
+* Switch to the new stable version of Eris (0.10.0) instead of the dev version
+
+## v2.23.2
+* Update Node.js version check at startup to require Node.js 10
+
+## v2.23.1
+* Updated required Node.js version in .nvmrc and README (v10 is now the minimum)
+
+## v2.23.0
+* Add update notifications. The bot will check for new versions every 12 hours and notify moderators at the top of new
+modmail threads when there are new versions available. Can be disabled by setting the `updateNotifications` option to `false`.
+New available versions are also shown in `!version`.
+  * If you have forked the repository and want to check for updates in your own repository instead,
+  change the `repository` value in `package.json`
+* Add basic support for plugins. See the **Plugins** section in README for more information.
+* Add support for snippet arguments. To use these, put {1}, {2}, etc. in the snippet text and they will be replaced by the given arguments when using the snippet.
+* Add support for multiple `mentionRole` config option values in an array
+* Add `commandAliases` config option to set custom command aliases
+* Add support for timed blocks. Simply specify the duration as the last argument in `!block` or `!unblock`.
+* Add pagination to `!logs`
+
+## v2.22.0
+* Add `guildGreetings` option to allow configuring greeting messages on a per-server basis
+* Add `rolesInThreadHeader` option to show the user's roles in the modmail thread's header
+
+## v2.21.3
+* Fix crash caused by Nitro Boosting notifications
+
+## v2.21.2
+* Update Eris to fix crashes with news channels and nitro boosting
+
+## v2.21.1
+* "Account age" and "time on server" requirements are now ignored when using `!newthread`
+
+## v2.21.0
+* Add `requiredTimeOnServer` and `timeOnServerDeniedMessage` config options to restrict modmail from users who have just joined the server. Thanks [@reboxer](https://github.com/reboxer) ([#270](https://github.com/Dragory/modmailbot/pull/270))!
+
+## v2.20.0
+* Add `categoryAutomation` option to automate thread categories. Currently supported sub-options:
+  * `newThread` - same as `newThreadCategoryId`, the default category for new threads
+  * `newThreadFromGuild` - default category on a per-guild basis, value is an object with guild IDs as keys and category IDs as values 
+* Threads should now include member information (nickname, joined at, etc.) more reliably
+* Thread header now also includes the member's current voice channel, if any
+
+## v2.19.0
+* Add `attachmentStorage` option to control where attachments are saved. Currently supported:
+  * `"local"` (default) - Same as before: attachments are saved locally on the machine running the bot and served through the bot's web server
+  * `"discord"` - Attachments are saved on a special Discord channel specified by the `attachmentStorageChannelId` option
+* Add `syncPermissionsOnMove` option. When enabled, thread channel permissions are synced with the category when the thread is moved with `!move`.
+* Add support for scheduling `!suspend`. Works the same way as with `!close`, just specify the time after the command. Can be cancelled with `!suspend cancel`.
+* Scheduled `!close` can now be silent - just add `silent` as an argument to the command before or after the schedule time
+* The schedule time format for `!close` is now stricter and times with whitespace (e.g. `2 h 30 m`) no longer work. Use e.g. `2h30m` instead.
+* `!loglink` can now be used in suspended threads
+* User can now be mentioned in `botMentionResponse` by adding `{userMention}` to the response text. Thanks @reboxer (#225)!
+* Fixed a small mistake in README, thanks @GabrielLewis2 (#226)!
+
+## v2.18.0
+* Add `silent` option to `!close` (e.g. `!close silent`) to close threads without sending the specified `closeMessage`
+* Update some package versions (may help with sqlite3 install issues)
+
 ## v2.17.0
 * Add `mentionUserInThreadHeader` option. When set to `true`, mentions the thread's user in the thread header. Fixes #152.
 * Add `botMentionResponse` option. If set, the bot auto-responds to bot mentions with this message. Fixes #143.

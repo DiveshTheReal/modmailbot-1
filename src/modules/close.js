@@ -1,4 +1,3 @@
-const humanizeDuration = require('humanize-duration');
 const moment = require('moment');
 const Eris = require('eris');
 const config = require('../config');
@@ -7,15 +6,17 @@ const threads = require('../data/threads');
 const blocked = require('../data/blocked');
 const {messageQueue} = require('../queue');
 
-module.exports = bot => {
-  const humanizeDelay = (delay, opts = {}) => humanizeDuration(delay, Object.assign({conjunction: ' and '}, opts));
-
+module.exports = ({ bot, knex, config, commands }) => {
   // Check for threads that are scheduled to be closed and close them
   async function applyScheduledCloses() {
     const threadsToBeClosed = await threads.getThreadsThatShouldBeClosed();
     for (const thread of threadsToBeClosed) {
-      if(config.closeMessage) await thread.postToUser(config.closeMessage).catch(() => {});
-      await thread.close();
+      if (config.closeMessage && ! thread.scheduled_close_silent) {
+        const closeMessage = utils.readMultilineConfigValue(config.closeMessage);
+        await thread.sendSystemMessageToUser(closeMessage).catch(() => {});
+      }
+
+      await thread.close(false, thread.scheduled_close_silent);
 
       const logUrl = await thread.getLogUrl();
       utils.postLog(utils.trimAll(`
@@ -38,8 +39,11 @@ module.exports = bot => {
   scheduledCloseLoop();
 
   // Close a thread. Closing a thread saves a log of the channel's contents and then deletes the channel.
-  bot.registerCommand('close', async (msg, args) => {
+  commands.addGlobalCommand('close', '[opts...]', async (msg, args) => {
     let thread, closedBy;
+
+    let hasCloseMessage = !! config.closeMessage;
+    let silentClose = false;
 
     if (msg.channel instanceof Eris.PrivateChannel) {
       // User is closing the thread by themselves (if enabled)
@@ -65,9 +69,8 @@ module.exports = bot => {
       thread = await threads.findOpenThreadByChannelId(msg.channel.id);
       if (! thread) return;
 
-      // Timed close
-      if (args.length) {
-        if (args[0].startsWith('c')) {
+      if (args.opts && args.opts.length) {
+        if (args.opts.includes('cancel') || args.opts.includes('c')) {
           // Cancel timed close
           if (thread.scheduled_close_at) {
             await thread.cancelScheduledClose();
@@ -77,27 +80,45 @@ module.exports = bot => {
           return;
         }
 
-        // Set a timed close
-        const delay = utils.convertDelayStringToMS(args.join(' '));
-        if (delay === 0 || delay === null) {
-          thread.postSystemMessage(`Invalid delay specified. Format: "1h30m"`);
-          return;
+        // Silent close (= no close message)
+        if (args.opts.includes('silent') || args.opts.includes('s')) {
+          silentClose = true;
         }
 
-        const closeAt = moment.utc().add(delay, 'ms');
-        await thread.scheduleClose(closeAt.format('YYYY-MM-DD HH:mm:ss'), msg.author);
-        thread.postSystemMessage(`Thread is now scheduled to be closed in ${humanizeDelay(delay)}. Use \`${config.prefix}close cancel\` to cancel.`);
+        // Timed close
+        const delayStringArg = args.opts.find(arg => utils.delayStringRegex.test(arg));
+        if (delayStringArg) {
+          const delay = utils.convertDelayStringToMS(delayStringArg);
+          if (delay === 0 || delay === null) {
+            thread.postSystemMessage(`Invalid delay specified. Format: "1h30m"`);
+            return;
+          }
 
-        return;
+          const closeAt = moment.utc().add(delay, 'ms');
+          await thread.scheduleClose(closeAt.format('YYYY-MM-DD HH:mm:ss'), msg.author, silentClose ? 1 : 0);
+
+          let response;
+          if (silentClose) {
+            response = `Thread is now scheduled to be closed silently in ${utils.humanizeDelay(delay)}. Use \`${config.prefix}close cancel\` to cancel.`;
+          } else {
+            response = `Thread is now scheduled to be closed in ${utils.humanizeDelay(delay)}. Use \`${config.prefix}close cancel\` to cancel.`;
+          }
+
+          thread.postSystemMessage(response);
+
+          return;
+        }
       }
 
       // Regular close
-      await thread.close();
+      await thread.close(false, silentClose);
       closedBy = msg.author.username;
     }
 
-    if (config.closeMessage) {
-      await thread.postToUser(config.closeMessage).catch(() => {});
+    // Send close message (unless suppressed with a silent close)
+    if (hasCloseMessage && ! silentClose) {
+      const closeMessage = utils.readMultilineConfigValue(config.closeMessage);
+      await thread.sendSystemMessageToUser(closeMessage).catch(() => {});
     }
 
     const logUrl = await thread.getLogUrl();
@@ -116,7 +137,11 @@ module.exports = bot => {
     if (! thread) return;
 
     console.log(`[INFO] Auto-closing thread with ${thread.user_name} because the channel was deleted`);
-    if (config.closeMessage) await thread.postToUser(config.closeMessage).catch(() => {});
+    if (config.closeMessage) {
+      const closeMessage = utils.readMultilineConfigValue(config.closeMessage);
+      await thread.sendSystemMessageToUser(closeMessage).catch(() => {});
+    }
+
     await thread.close(true);
 
     const logUrl = await thread.getLogUrl();
